@@ -1,4 +1,4 @@
-// script-production.js - Updated Frontend for Production API v2.0
+// script.js - Complete Production Frontend for TapsiFood Dashboard v2.0
 document.addEventListener('DOMContentLoaded', () => {
     let map;
     let vendorLayerGroup = L.featureGroup();
@@ -9,6 +9,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentHeatmapType = 'none';
     let showVendorRadius = true;
     let vendorsAreVisible = true;
+    let allVendorsData = [];
+    let allPolygonsData = null;
+    let allCoverageGridData = [];
+    let initialFilterData = {};
+    let lastHeatmapData = null;
     let currentRadiusModifier = 1.0;
     let currentRadiusMode = 'percentage';
     let currentRadiusFixed = 3.0;
@@ -17,6 +22,17 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentPage = 1;
     let totalPages = 1;
     let isLoading = false;
+
+    // Enhanced heatmap management variables
+    let heatmapConfig = {
+        autoOptimize: true,
+        baseRadius: 25,
+        baseBlur: 15,
+        maxIntensity: 1.0,
+        smoothTransitions: true,
+        zoomIndependent: true
+    };
+    let lastOptimalParams = null;
 
     // Production API endpoints
     const API_BASE_URL = '/api/v2';
@@ -29,14 +45,111 @@ document.addEventListener('DOMContentLoaded', () => {
         retryDelay: 1000
     };
 
-    // DOM Elements (keeping existing structure)
+    // DOM Elements
     const bodyEl = document.body;
     const daterangeStartEl = document.getElementById('daterange-start');
     const daterangeEndEl = document.getElementById('daterange-end');
     const cityEl = document.getElementById('city');
     const areaMainTypeEl = document.getElementById('area-main-type');
+    const vendorCodesFilterEl = document.getElementById('vendor-codes-filter');
+    const vendorVisibleEl = document.getElementById('vendor-visible');
+    const vendorIsOpenEl = document.getElementById('vendor-is-open');
+    const vendorRadiusToggleBtn = document.getElementById('vendor-radius-toggle');
+    const radiusEdgeColorEl = document.getElementById('radius-edge-color');
+    const radiusInnerColorEl = document.getElementById('radius-inner-color');
+    const radiusInnerNoneEl = document.getElementById('radius-inner-none');
+    const vendorMarkerSizeEl = document.getElementById('vendor-marker-size');
+    const markerSizeValueEl = document.getElementById('marker-size-value');
+    const areaFillColorEl = document.getElementById('area-fill-color');
+    const areaFillNoneEl = document.getElementById('area-fill-none');
     const applyFiltersBtn = document.getElementById('apply-filters-btn');
+    
+    // Radius modifier elements
+    const vendorRadiusModifierEl = document.getElementById('vendor-radius-modifier');
+    const radiusModifierValueEl = document.getElementById('radius-modifier-value');
+    const btnResetRadius = document.getElementById('btn-reset-radius');
+    
+    // Radius mode elements
+    const radiusModeSelector = document.getElementById('radius-mode-selector');
+    const radiusPercentageControl = document.getElementById('radius-percentage-control');
+    const radiusFixedControl = document.getElementById('radius-fixed-control');
+    const vendorRadiusFixedEl = document.getElementById('vendor-radius-fixed');
+    const radiusFixedValueEl = document.getElementById('radius-fixed-value');
+    
+    // Grid visualization elements
+    const gridBlurEl = document.getElementById('grid-blur');
+    const gridBlurValueEl = document.getElementById('grid-blur-value');
+    const gridFadeEl = document.getElementById('grid-fade');
+    const gridFadeValueEl = document.getElementById('grid-fade-value');
+    const marketingAreasOnTopBtn = document.getElementById('marketing-areas-on-top');
+    const gridVisualizationSection = document.getElementById('grid-visualization-section');
+    const gridPointSizeEl = document.getElementById('grid-point-size');
+    const gridPointSizeValueEl = document.getElementById('grid-point-size-value');
+    
+    // Lat/Lng finder elements
+    const latFinderInputEl = document.getElementById('lat-finder-input');
+    const lngFinderInputEl = document.getElementById('lng-finder-input');
+    const btnFindLocation = document.getElementById('btn-find-location');
+    
+    const vendorAreaMainTypeEl = document.getElementById('vendor-area-main-type');
     let globalLoadingOverlayEl = document.getElementById('map-loading-overlay-wrapper');
+    
+    const mapTypeButtons = {
+        densityTotal: document.getElementById('btn-order-density-total'),
+        densityOrganic: document.getElementById('btn-order-density-organic'),
+        densityNonOrganic: document.getElementById('btn-order-density-non-organic'),
+        userDensity: document.getElementById('btn-user-density-heatmap'),
+        population: document.getElementById('btn-population-heatmap'),
+        vendors: document.getElementById('btn-vendors-map'),
+    };
+    const btnToggleVendors = document.getElementById('btn-toggle-vendors');
+    const btnClearHeatmap = document.getElementById('btn-clear-heatmap');
+    
+    // Heatmap control elements
+    const heatmapRadiusEl = document.getElementById('heatmap-radius');
+    const heatmapRadiusValueEl = document.getElementById('heatmap-radius-value');
+    const heatmapBlurEl = document.getElementById('heatmap-blur');
+    const heatmapBlurValueEl = document.getElementById('heatmap-blur-value');
+    const heatmapMaxValEl = document.getElementById('heatmap-max-val');
+    const heatmapMaxValValueEl = document.getElementById('heatmap-max-val-value');
+
+    const customFilterConfigs = {
+        areaSubType: {
+            button: document.getElementById('area-sub-type-filter-button'),
+            panel: document.getElementById('area-sub-type-filter-panel'),
+            paramName: 'area_sub_type_filter', defaultText: 'Select Sub Types', optionsData: []
+        },
+        businessLine: {
+            button: document.getElementById('business-line-filter-button'),
+            panel: document.getElementById('business-line-filter-panel'),
+            paramName: 'business_lines', defaultText: 'Select Business Lines', optionsData: []
+        },
+        vendorStatus: { 
+            button: document.getElementById('vendor-status-filter-button'),
+            panel: document.getElementById('vendor-status-filter-panel'),
+            paramName: 'vendor_status_ids', defaultText: 'Select Statuses', optionsData: []
+        },
+        vendorGrade: { 
+            button: document.getElementById('vendor-grade-filter-button'),
+            panel: document.getElementById('vendor-grade-filter-panel'),
+            paramName: 'vendor_grades', defaultText: 'Select Grades', optionsData: []
+        },
+        vendorAreaSubType: {
+            button: document.getElementById('vendor-area-sub-type-filter-button'),
+            panel: document.getElementById('vendor-area-sub-type-filter-panel'),
+            paramName: 'vendor_area_sub_type', defaultText: 'Select Sub Areas', optionsData: []
+        }
+    };
+
+    let defaultVendorIcon = L.icon({
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+        iconSize: [12 * 2, 12 * (41/25) * 2],
+        iconAnchor: [12, 12 * (41/25) * 2],
+        popupAnchor: [0, -12 * (41/25) * 2],
+        shadowSize: [12 * (41/25) * 2, 12 * (41/25) * 2],
+    });
 
     // Enhanced API call function with retry logic
     async function apiCall(endpoint, options = {}) {
@@ -83,6 +196,34 @@ document.addEventListener('DOMContentLoaded', () => {
         throw lastError;
     }
 
+    // System health check
+    async function checkSystemHealth() {
+        try {
+            const health = await apiCall(`${API_BASE_URL}/health`);
+            
+            const issues = [];
+            if (health.services?.database !== 'healthy') {
+                issues.push('Database connection');
+            }
+            if (health.services?.cache !== 'healthy') {
+                issues.push('Cache connection');
+            }
+            
+            return {
+                healthy: issues.length === 0,
+                issues: issues,
+                status: health
+            };
+        } catch (error) {
+            console.error('Health check failed:', error);
+            return {
+                healthy: false,
+                issues: ['API not responding'],
+                status: null
+            };
+        }
+    }
+
     // Enhanced initialization with health check
     async function init() {
         try {
@@ -113,6 +254,37 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Initialize UI components
             initializeUIComponents();
+            updateVendorIconSize(vendorMarkerSizeEl.value);
+            
+            // Enhanced default heatmap values
+            heatmapRadiusEl.value = "25";
+            heatmapRadiusValueEl.textContent = "25";
+            heatmapBlurEl.value = "15";
+            heatmapBlurValueEl.textContent = "15";
+            heatmapMaxValEl.value = "1.0";
+            heatmapMaxValValueEl.textContent = "1.0";
+            
+            // Initialize radius modifier
+            vendorRadiusModifierEl.value = "100";
+            radiusModifierValueEl.textContent = "100";
+            currentRadiusModifier = 1.0;
+            currentRadiusMode = 'percentage';
+            currentRadiusFixed = 3.0;
+            vendorRadiusFixedEl.value = "3";
+            radiusFixedValueEl.textContent = "3";
+            
+            // Initialize grid visualization controls
+            gridBlurEl.value = "0";
+            gridBlurValueEl.textContent = "0";
+            gridFadeEl.value = "100";
+            gridFadeValueEl.textContent = "100";
+            gridPointSizeEl.value = "6";
+            gridPointSizeValueEl.textContent = "6";
+            marketingAreasOnTop = false;
+            marketingAreasOnTopBtn.classList.remove('active');
+            
+            btnToggleVendors.textContent = vendorsAreVisible ? 'Vendors On' : 'Vendors Off';
+            btnToggleVendors.classList.toggle('active', vendorsAreVisible);
             
             showLoading(true, 'Loading map data...');
             await fetchAndDisplayMapData();
@@ -129,32 +301,35 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // System health check
-    async function checkSystemHealth() {
-        try {
-            const health = await apiCall(`${API_BASE_URL}/health`);
-            
-            const issues = [];
-            if (health.services?.database !== 'healthy') {
-                issues.push('Database connection');
-            }
-            if (health.services?.cache !== 'healthy') {
-                issues.push('Cache connection');
-            }
-            
-            return {
-                healthy: issues.length === 0,
-                issues: issues,
-                status: health
-            };
-        } catch (error) {
-            console.error('Health check failed:', error);
-            return {
-                healthy: false,
-                issues: ['API not responding'],
-                status: null
-            };
-        }
+    function initMap() {
+        const mapContainer = document.getElementById('map');
+        if (mapContainer) mapContainer.innerHTML = '';
+        
+        map = L.map('map', { 
+            preferCanvas: true,
+            attributionControl: false 
+        }).setView([35.7219, 51.3347], 11);
+        
+        // Create panes for layer ordering
+        map.createPane('polygonPane');
+        map.getPane('polygonPane').style.zIndex = 450;
+        
+        map.createPane('coverageGridPane');
+        map.getPane('coverageGridPane').style.zIndex = 460;
+        
+        map.getPane('shadowPane').style.zIndex = 250;
+        
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+            attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/attributions">CARTO</a>',
+            subdomains: 'abcd',
+            maxZoom: 20
+        }).addTo(map);
+        
+        L.control.attribution({position: 'bottomleft'}).addTo(map);
+        
+        if (vendorsAreVisible) vendorLayerGroup.addTo(map);
+        polygonLayerGroup.addTo(map);
+        coverageGridLayerGroup.addTo(map);
     }
 
     // Enhanced initial data fetching
@@ -162,6 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const data = await apiCall(`${API_BASE_URL}/initial-data`);
             window.initialFilterData = data;
+            initialFilterData = data;
             return data;
         } catch (error) {
             console.error("Failed to fetch initial data:", error);
@@ -169,6 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const fallbackData = await apiCall(`${LEGACY_API_URL}/initial-data`);
                 window.initialFilterData = fallbackData;
+                initialFilterData = fallbackData;
                 return fallbackData;
             } catch (fallbackError) {
                 throw new Error(`Failed to load configuration: ${error.message}`);
@@ -203,8 +380,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 updatePaginationUI(data.pagination);
             }
             
+            // Store data
+            allVendorsData = data.vendors || [];
+            allPolygonsData = data.polygons || null;
+            lastHeatmapData = data.heatmap_data || null;
+            allCoverageGridData = data.coverage_grid || [];
+
             // Update map layers
-            updateMapLayers(data);
+            updateMapLayers();
             
             // Update metadata display
             updateMetadataDisplay(data.metadata);
@@ -226,6 +409,19 @@ document.addEventListener('DOMContentLoaded', () => {
     function buildApiParams() {
         const params = new URLSearchParams();
         
+        const isCoverageGrid = areaMainTypeEl.value === 'coverage_grid';
+        const selectedCity = cityEl.value;
+        const selectedBLs = getSelectedValuesFromCustomDropdown(customFilterConfigs.businessLine);
+
+        if (isCoverageGrid && selectedCity === 'tehran') {
+            if (selectedBLs.length !== 1) {
+                showLoading(false);
+                alert('Target-based Coverage Analysis requires selecting exactly ONE Business Line.');
+                if(applyFiltersBtn) applyFiltersBtn.disabled = false;
+                return params;
+            }
+        }
+
         // Basic filters
         params.append('city', cityEl.value);
         params.append('start_date', daterangeStartEl.value);
@@ -237,62 +433,66 @@ document.addEventListener('DOMContentLoaded', () => {
         params.append('page_size', '1000');
         
         // Business lines
-        const selectedBLs = getSelectedValuesFromCustomDropdown(customFilterConfigs.businessLine);
         selectedBLs.forEach(bl => params.append('business_lines', bl));
         
         // Vendor codes
-        const vendorCodesText = document.getElementById('vendor-codes-filter')?.value?.trim();
+        const vendorCodesText = vendorCodesFilterEl?.value?.trim();
         if (vendorCodesText) {
             params.append('vendor_codes_filter', vendorCodesText);
         }
-        
-        // Other filters (add as needed)
-        const selectedAreaSubTypes = getSelectedValuesFromCustomDropdown(customFilterConfigs.areaSubType);
-        selectedAreaSubTypes.forEach(st => params.append('area_sub_type_filter', st));
+
+        // Area sub types
+        getSelectedValuesFromCustomDropdown(customFilterConfigs.areaSubType)
+            .forEach(val => params.append(customFilterConfigs.areaSubType.paramName, val));
+
+        // Vendor filters
+        params.append('vendor_area_main_type', vendorAreaMainTypeEl.value);
+        getSelectedValuesFromCustomDropdown(customFilterConfigs.vendorAreaSubType)
+            .forEach(val => params.append(customFilterConfigs.vendorAreaSubType.paramName, val));
+        getSelectedValuesFromCustomDropdown(customFilterConfigs.vendorStatus)
+            .forEach(val => params.append(customFilterConfigs.vendorStatus.paramName, val));
+        getSelectedValuesFromCustomDropdown(customFilterConfigs.vendorGrade)
+            .forEach(val => params.append(customFilterConfigs.vendorGrade.paramName, val));
+
+        params.append('vendor_visible', vendorVisibleEl.value);
+        params.append('vendor_is_open', vendorIsOpenEl.value);
+        params.append('radius_modifier', currentRadiusModifier);
+        params.append('radius_mode', currentRadiusMode);
+        params.append('radius_fixed', currentRadiusFixed);
         
         return params;
     }
 
     // Update map layers with new data
-    function updateMapLayers(data) {
-        // Clear existing layers
-        vendorLayerGroup.clearLayers();
-        polygonLayerGroup.clearLayers();
-        coverageGridLayerGroup.clearLayers();
+    function updateMapLayers() {
+        redrawVendorMarkersAndRadii();
+        restylePolygons();
+        drawCoverageGrid();
+        renderCurrentHeatmap();
         
-        if (heatmapLayer) {
-            map.removeLayer(heatmapLayer);
-            heatmapLayer = null;
+        // When displaying the grid, polygons should be hidden by default.
+        if (areaMainTypeEl.value === 'coverage_grid') {
+            if (!marketingAreasOnTop && map.hasLayer(polygonLayerGroup)) {
+                map.removeLayer(polygonLayerGroup);
+            }
+        } else {
+            if (!map.hasLayer(polygonLayerGroup)) {
+                map.addLayer(polygonLayerGroup);
+            }
         }
         
-        // Add vendors
-        if (data.vendors && vendorsAreVisible) {
-            addVendorsToMap(data.vendors);
-        }
-        
-        // Add polygons
-        if (data.polygons && data.polygons.features) {
-            addPolygonsToMap(data.polygons);
-        }
-        
-        // Add heatmap
-        if (data.heatmap_data && data.heatmap_data.length > 0) {
-            addHeatmapToMap(data.heatmap_data);
-        }
-        
-        // Add coverage grid
-        if (data.coverage_grid && data.coverage_grid.length > 0) {
-            addCoverageGridToMap(data.coverage_grid);
-        }
-        
-        // Adjust map view
         adjustMapView();
+        applyGridVisualizationEffects();
+        updateLayerOrder();
     }
 
     // Enhanced vendor rendering
-    function addVendorsToMap(vendors) {
-        vendors.forEach(vendor => {
-            if (vendor.latitude == null || vendor.longitude == null) return;
+    function redrawVendorMarkersAndRadii() {
+        vendorLayerGroup.clearLayers(); 
+        if (!allVendorsData || allVendorsData.length === 0) return;
+        
+        allVendorsData.forEach(vendor => {
+            if (vendor.latitude == null || vendor.longitude == null) return; 
             
             const popupContent = `
                 <div class="vendor-popup">
@@ -313,26 +513,13 @@ document.addEventListener('DOMContentLoaded', () => {
             }).bindPopup(popupContent);
             
             vendorLayerGroup.addLayer(marker);
-            
-            // Add radius circle if enabled
-            if (showVendorRadius && vendor.radius > 0) {
-                const circle = L.circle([vendor.latitude, vendor.longitude], {
-                    radius: vendor.radius * 1000,
-                    color: document.getElementById('radius-edge-color')?.value || '#E57373',
-                    fillColor: document.getElementById('radius-inner-none')?.checked ? 
-                        'transparent' : (document.getElementById('radius-inner-color')?.value || '#FFCDD2'),
-                    fillOpacity: document.getElementById('radius-inner-none')?.checked ? 0 : 0.25,
-                    weight: 1.5,
-                    pane: 'shadowPane'
-                });
-                vendorLayerGroup.addLayer(circle);
-            }
         });
+        redrawVendorRadii(); 
     }
 
     // Get vendor icon based on properties
     function getVendorIcon(vendor) {
-        const baseSize = parseInt(document.getElementById('vendor-marker-size')?.value || 12);
+        const baseSize = parseInt(vendorMarkerSizeEl?.value || 12);
         const aspectRatio = 41/25;
         const iconWidth = baseSize;
         const iconHeight = Math.round(iconWidth * aspectRatio);
@@ -359,57 +546,331 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Enhanced heatmap rendering
-    function addHeatmapToMap(heatmapData) {
-        if (!heatmapData || heatmapData.length === 0) return;
+    function redrawVendorRadii() {
+        // Remove existing circles
+        const circles = [];
+        vendorLayerGroup.eachLayer(layer => {
+            if (layer instanceof L.Circle) {
+                circles.push(layer);
+            }
+        });
+        circles.forEach(circle => vendorLayerGroup.removeLayer(circle));
         
-        const validData = heatmapData.filter(p => 
+        if (!showVendorRadius || !allVendorsData) return; 
+        
+        const rEdgeColor = radiusEdgeColorEl.value;
+        const rInnerIsNone = radiusInnerNoneEl.checked;
+        const rInnerColor = rInnerIsNone ? 'transparent' : radiusInnerColorEl.value;
+        
+        allVendorsData.forEach(vendor => {
+            if (vendor.latitude != null && vendor.longitude != null && vendor.radius > 0) {
+                 L.circle([vendor.latitude, vendor.longitude], {
+                    radius: vendor.radius * 1000, // radius is already modified by backend
+                    color: rEdgeColor, 
+                    fillColor: rInnerColor, 
+                    fillOpacity: rInnerIsNone ? 0 : 0.25, 
+                    weight: 1.5,
+                    pane: 'shadowPane'
+                }).addTo(vendorLayerGroup); 
+            }
+        });
+    }
+
+    function restylePolygons() {
+        polygonLayerGroup.clearLayers();
+        if (!allPolygonsData || !allPolygonsData.features || allPolygonsData.features.length === 0) return;
+        
+        const polyFillIsNone = areaFillNoneEl.checked;
+        const polyFillColor = polyFillIsNone ? 'transparent' : areaFillColorEl.value;
+        
+        L.geoJSON(allPolygonsData, {
+            pane: 'polygonPane',
+            style: (feature) => ({
+                color: "#1E88E5", 
+                weight: 1.5, 
+                opacity: 0.7,
+                fillColor: polyFillColor, 
+                fillOpacity: polyFillIsNone ? 0 : 0.3
+            }),
+            onEachFeature: (feature, layer) => {
+                let popupContent = '';
+                if (feature.properties) {
+                    const p = feature.properties;
+                    const nameCand = p.name || p.NAME || p.Name || p.Region || p.REGION_N || p.NAME_1 || p.NAME_2 || p.district || p.NAME_MAHAL;
+                    const name = decodeURIComponentSafe(nameCand) || "Area Detail";
+                    popupContent += `<b>${name}</b>`;
+                    
+                    // Population Data Section
+                    if (p.Pop != null || p.PopDensity != null) {
+                        popupContent += `<br><hr style="margin: 5px 0; border-color: #eee;"><em>Population Stats:</em>`;
+                        if (p.Pop != null) {
+                            popupContent += `<br><b>Population:</b> ${Number(p.Pop).toLocaleString()}`;
+                        }
+                        if (p.PopDensity != null) {
+                             popupContent += `<br><b>Population Density:</b> ${Number(p.PopDensity).toFixed(2)}/km²`;
+                        }
+                    }
+                    
+                    // Filter-Based Data Section
+                    if (p.vendor_count != null || p.unique_user_count != null) {
+                        popupContent += `<br><hr style="margin: 5px 0; border-color: #eee;"><em>Metrics (based on filters):</em>`;
+                        
+                        if (p.vendor_count != null) {
+                             popupContent += `<br><b>Total Filtered Vendors:</b> ${p.vendor_count}`;
+                        }
+                        if (p.grade_counts && Object.keys(p.grade_counts).length > 0) {
+                            popupContent += `<br><b>- By Grade:</b> `;
+                            const gradeStrings = Object.entries(p.grade_counts)
+                                                      .sort((a, b) => b[1] - a[1])
+                                                      .map(([grade, count]) => `${grade}: ${count}`);
+                            popupContent += gradeStrings.join(', ');
+                        }
+                        if (p.vendor_per_10k_pop != null) {
+                            popupContent += `<br><b>- Vendors per 10k Pop:</b> ${Number(p.vendor_per_10k_pop).toFixed(2)}`;
+                        }
+                        
+                        if (p.unique_user_count != null) {
+                             popupContent += `<br><b>Unique Customers (date range):</b> ${p.unique_user_count.toLocaleString()}`;
+                        }
+                        if (p.total_unique_user_count != null) {
+                             popupContent += `<br><b>Unique Customers (all time):</b> ${p.total_unique_user_count.toLocaleString()}`;
+                        }
+                    }
+                } else {
+                    popupContent = '<b>Area</b>';
+                }
+                layer.bindPopup(popupContent);
+            }
+        }).addTo(polygonLayerGroup);
+    }
+
+    function drawCoverageGrid() {
+        coverageGridLayerGroup.clearLayers();
+        if (areaMainTypeEl.value !== 'coverage_grid' || !allCoverageGridData || allCoverageGridData.length === 0) {
+            return;
+        }
+        
+        const gridPointSize = parseInt(gridPointSizeEl.value) || 6;
+        
+        allCoverageGridData.forEach(point => {
+            let color = '#808080';
+            let popupContent = `<b>Coverage at (${point.lat.toFixed(4)}, ${point.lng.toFixed(4)})</b><br>`;
+            
+            if (point.marketing_area) {
+                popupContent += `<b>Marketing Area:</b> ${decodeURIComponentSafe(point.marketing_area)}<br>`;
+            }
+            
+            if (point.target_business_line && point.target_value != null) {
+                const { actual_value, target_value, performance_ratio } = point;
+                
+                if (actual_value === 0) {
+                    color = '#d3d3d3';
+                } else if (performance_ratio >= 1.2) {
+                    color = '#004d00';
+                } else if (performance_ratio >= 1.0) {
+                    color = '#00FF00';
+                } else if (performance_ratio >= 0.8) {
+                    color = '#ffff00';
+                } else if (performance_ratio >= 0.6) {
+                    color = '#ff9900';
+                } else if (performance_ratio >= 0.4) {
+                    color = '#ff0000';
+                } else if (performance_ratio >= 0.2) {
+                    color = '#8B0000';
+                } else {
+                    color = '#000000';
+                }
+                
+                popupContent += `<hr style="margin: 4px 0;"><b>Target Analysis (${point.target_business_line})</b><br>`;
+                popupContent += `<b>Target Count:</b> ${target_value}<br>`;
+                popupContent += `<b>Actual Count:</b> ${actual_value}<br>`;
+                popupContent += `<b>Performance:</b> <b style="color:${color};">${(performance_ratio * 100).toFixed(0)}%</b><br>`;
+            } else {
+                popupContent += `<br><i>No target data found for this Business Line in this area.</i>`;
+            }
+            
+            const coverage = point.coverage;
+            popupContent += `<hr style="margin: 4px 0;"><b>Total Covering Vendors:</b> ${coverage.total_vendors}<br>`;
+            
+            if (coverage.by_business_line && Object.keys(coverage.by_business_line).length > 0) {
+                popupContent += '<b>By Business Line:</b><br>';
+                Object.entries(coverage.by_business_line)
+                    .sort((a, b) => b[1] - a[1])
+                    .forEach(([bl, count]) => {
+                        popupContent += `  ${bl}: ${count}<br>`;
+                    });
+            }
+            
+            if (coverage.by_grade && Object.keys(coverage.by_grade).length > 0) {
+                popupContent += '<b>By Grade:</b><br>';
+                Object.entries(coverage.by_grade)
+                    .sort((a,b) => b[1] - a[1])
+                    .forEach(([grade, count]) => {
+                        popupContent += `  ${grade}: ${count}<br>`;
+                    });
+            }
+            
+            const marker = L.circleMarker([point.lat, point.lng], {
+                radius: gridPointSize,
+                fillColor: color,
+                color: '#333',
+                weight: 1,
+                opacity: 0.8,
+                fillOpacity: 0.8,
+                pane: 'coverageGridPane'
+            });
+            
+            marker.bindPopup(popupContent);
+            coverageGridLayerGroup.addLayer(marker);
+        });
+    }
+
+    // Enhanced heatmap rendering with optimal parameters
+    function renderCurrentHeatmap() {
+        if (heatmapLayer) {
+            map.removeLayer(heatmapLayer);
+            heatmapLayer = null;
+        }
+
+        if (currentHeatmapType === 'none' || !lastHeatmapData || lastHeatmapData.length === 0) {
+            return;
+        }
+
+        // Filter out invalid data points
+        const validData = lastHeatmapData.filter(p => 
             p.lat != null && p.lng != null && p.value != null && 
-            !isNaN(p.lat) && !isNaN(p.lng) && !isNaN(p.value) && p.value > 0
+            !isNaN(p.lat) && !isNaN(p.lng) && !isNaN(p.value) &&
+            p.value > 0
         );
+
+        if (validData.length === 0) {
+            console.warn('No valid heatmap data after filtering');
+            return;
+        }
+
+        currentZoomLevel = map.getZoom();
         
-        if (validData.length === 0) return;
-        
-        const heatPoints = validData.map(p => [p.lat, p.lng, p.value / 100]);
-        
-        const heatOptions = {
-            radius: getOptimalHeatmapRadius(),
-            blur: parseInt(document.getElementById('heatmap-blur')?.value || 15),
-            max: parseFloat(document.getElementById('heatmap-max-val')?.value || 1.0),
+        // Get optimized parameters
+        const optimalParams = heatmapConfig.autoOptimize ? 
+            calculateOptimalHeatmapParams(validData, currentZoomLevel) : 
+            getZoomAdjustedHeatmapOptions();
+
+        lastOptimalParams = optimalParams;
+
+        // Update UI to show optimal parameters
+        if (heatmapConfig.autoOptimize) {
+            updateHeatmapControlsDisplay(optimalParams);
+        }
+
+        // Prepare heatmap data
+        const heatPoints = validData.map(p => {
+            const intensity = Math.max(0.1, Math.min(100, p.value)) / 100;
+            return [p.lat, p.lng, intensity];
+        });
+
+        // Enhanced heatmap options
+        let heatOptions = {
+            radius: optimalParams.radius,
+            blur: optimalParams.blur,
+            max: optimalParams.max,
             minOpacity: 0.3,
-            gradient: getHeatmapGradient(currentHeatmapType)
+            maxZoom: 18,
+            pane: 'overlayPane'
         };
-        
+
+        // Enhanced gradients for different heatmap types
+        heatOptions.gradient = getHeatmapGradient(currentHeatmapType);
+
+        console.log(`Rendering heatmap: ${validData.length} points, radius: ${optimalParams.radius}, blur: ${optimalParams.blur}, max: ${optimalParams.max.toFixed(2)}`);
+
         heatmapLayer = L.heatLayer(heatPoints, heatOptions).addTo(map);
-        
+
         // Make heatmap non-interactive
-        if (heatmapLayer.getPane) {
+        if (heatmapLayer && heatmapLayer.getPane()) {
             heatmapLayer.getPane().style.pointerEvents = 'none';
         }
-        
-        console.log(`Rendered heatmap: ${validData.length} points`);
     }
 
-    // Get optimal heatmap radius based on zoom
-    function getOptimalHeatmapRadius() {
-        const baseRadius = parseInt(document.getElementById('heatmap-radius')?.value || 25);
-        const zoomLevel = map.getZoom();
-        
-        // Auto-optimize based on zoom level
-        if (document.getElementById('heatmap-auto-optimize')?.classList.contains('active')) {
-            let multiplier = 1.0;
-            if (zoomLevel <= 10) multiplier = 1.8;
-            else if (zoomLevel <= 12) multiplier = 1.4;
-            else if (zoomLevel >= 16) multiplier = 0.7;
-            else if (zoomLevel >= 14) multiplier = 0.85;
-            
-            return Math.round(baseRadius * multiplier);
+    // Calculate optimal heatmap parameters
+    function calculateOptimalHeatmapParams(data, zoomLevel) {
+        if (!data || data.length === 0) {
+            return { max: 1.0, radius: 25, blur: 15 };
         }
+
+        const values = data.map(point => point.value).filter(v => v != null && !isNaN(v));
+        if (values.length === 0) {
+            return { max: 1.0, radius: 25, blur: 15 };
+        }
+
+        values.sort((a, b) => a - b);
+        const p90 = values[Math.floor(values.length * 0.90)];
+
+        let optimalMax = p90 / 100.0;
+        if (optimalMax <= 0) optimalMax = 1.0;
         
-        return baseRadius;
+        // Zoom-dependent radius scaling
+        let radiusMultiplier = 1.0;
+        if (zoomLevel <= 10) {
+            radiusMultiplier = 1.8;
+        } else if (zoomLevel <= 12) {
+            radiusMultiplier = 1.4;
+        } else if (zoomLevel >= 16) {
+            radiusMultiplier = 0.7;
+        } else if (zoomLevel >= 14) {
+            radiusMultiplier = 0.85;
+        }
+
+        const optimalRadius = Math.round(heatmapConfig.baseRadius * radiusMultiplier);
+
+        // Data density-dependent blur
+        const dataDensity = data.length / 1000;
+        let blurMultiplier = 1.0;
+        if (dataDensity > 3) {
+            blurMultiplier = 1.4;
+        } else if (dataDensity > 1.5) {
+            blurMultiplier = 1.2;
+        } else if (dataDensity < 0.5) {
+            blurMultiplier = 0.8;
+        }
+
+        const optimalBlur = Math.round(heatmapConfig.baseBlur * blurMultiplier);
+
+        return {
+            max: Math.max(0.1, Math.min(3.0, optimalMax)),
+            radius: Math.max(5, Math.min(60, optimalRadius)),
+            blur: Math.max(5, Math.min(40, optimalBlur))
+        };
     }
 
-    // Get heatmap gradient based on type
+    function getZoomAdjustedHeatmapOptions() {
+        const currentZoom = map.getZoom();
+        const userRadius = parseInt(heatmapRadiusEl.value);
+        const userBlur = parseInt(heatmapBlurEl.value);
+        const userMax = parseFloat(heatmapMaxValEl.value);
+        
+        if (!heatmapConfig.autoOptimize) {
+            const zoomFactor = Math.pow(1.1, currentZoom - 11);
+            return {
+                radius: Math.round(userRadius * Math.min(2, Math.max(0.5, zoomFactor))),
+                blur: userBlur,
+                max: userMax,
+                minOpacity: 0.3
+            };
+        }
+
+        if (lastOptimalParams && heatmapConfig.smoothTransitions) {
+            const optimal = calculateOptimalHeatmapParams(lastHeatmapData, currentZoom);
+            return {
+                radius: Math.round((lastOptimalParams.radius + optimal.radius) / 2),
+                blur: Math.round((lastOptimalParams.blur + optimal.blur) / 2),
+                max: (lastOptimalParams.max + optimal.max) / 2,
+                minOpacity: 0.3
+            };
+        }
+
+        return calculateOptimalHeatmapParams(lastHeatmapData, currentZoom);
+    }
+
     function getHeatmapGradient(type) {
         switch (type) {
             case 'order_density':
@@ -429,6 +890,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     0.6: 'rgba(200, 255, 0, 0.8)',
                     0.8: 'rgba(255, 200, 0, 0.9)',
                     1.0: 'rgba(255, 100, 0, 1)'
+                };
+            case 'order_density_non_organic':
+                return {
+                    0.0: 'rgba(128, 0, 128, 0)',
+                    0.2: 'rgba(150, 0, 150, 0.5)',
+                    0.4: 'rgba(200, 0, 200, 0.7)',
+                    0.6: 'rgba(255, 0, 150, 0.8)',
+                    0.8: 'rgba(255, 50, 100, 0.9)',
+                    1.0: 'rgba(255, 0, 0, 1)'
                 };
             case 'user_density':
                 return {
@@ -450,21 +920,75 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function updateHeatmapControlsDisplay(optimalParams) {
+        if (!heatmapConfig.autoOptimize || !optimalParams) return;
+
+        // Update sliders to show optimal values without triggering events
+        const originalRadiusHandler = heatmapRadiusEl.oninput;
+        const originalBlurHandler = heatmapBlurEl.oninput;
+        const originalMaxHandler = heatmapMaxValEl.oninput;
+
+        heatmapRadiusEl.oninput = null;
+        heatmapBlurEl.oninput = null;
+        heatmapMaxValEl.oninput = null;
+
+        heatmapRadiusEl.value = optimalParams.radius;
+        heatmapRadiusValueEl.textContent = optimalParams.radius;
+
+        heatmapBlurEl.value = optimalParams.blur;
+        heatmapBlurValueEl.textContent = optimalParams.blur;
+
+        heatmapMaxValEl.value = optimalParams.max.toFixed(1);
+        heatmapMaxValValueEl.textContent = optimalParams.max.toFixed(1);
+
+        // Restore event handlers
+        setTimeout(() => {
+            heatmapRadiusEl.oninput = originalRadiusHandler;
+            heatmapBlurEl.oninput = originalBlurHandler;
+            heatmapMaxValEl.oninput = originalMaxHandler;
+        }, 100);
+    }
+
+    function setupHeatmapZoomHandler() {
+        let zoomTimeout;
+        
+        map.on('zoomstart', () => {
+            if (zoomTimeout) {
+                clearTimeout(zoomTimeout);
+            }
+        });
+
+        map.on('zoomend', () => {
+            const newZoomLevel = map.getZoom();
+            
+            if (Math.abs(newZoomLevel - currentZoomLevel) >= 0.5) {
+                currentZoomLevel = newZoomLevel;
+                
+                if (zoomTimeout) {
+                    clearTimeout(zoomTimeout);
+                }
+                
+                zoomTimeout = setTimeout(() => {
+                    if (currentHeatmapType !== 'none' && lastHeatmapData) {
+                        renderCurrentHeatmap();
+                    }
+                }, 200);
+            }
+        });
+    }
+
     // Pagination UI update
     function updatePaginationUI(pagination) {
-        // Create pagination controls if they don't exist
         let paginationContainer = document.getElementById('pagination-controls');
         if (!paginationContainer) {
             paginationContainer = document.createElement('div');
             paginationContainer.id = 'pagination-controls';
             paginationContainer.className = 'pagination-controls';
             
-            // Insert after the map
             const mapContainer = document.getElementById('map');
             mapContainer.parentNode.insertBefore(paginationContainer, mapContainer.nextSibling);
         }
         
-        // Update pagination info
         paginationContainer.innerHTML = `
             <div class="pagination-info">
                 <span>Page ${pagination.page} of ${pagination.total_pages}</span>
@@ -492,7 +1016,6 @@ document.addEventListener('DOMContentLoaded', () => {
             metadataContainer.id = 'metadata-display';
             metadataContainer.className = 'metadata-display';
             
-            // Insert in sidebar or create a dedicated area
             const sidebar = document.querySelector('.sidebar-filters');
             if (sidebar) {
                 sidebar.appendChild(metadataContainer);
@@ -502,15 +1025,290 @@ document.addEventListener('DOMContentLoaded', () => {
         metadataContainer.innerHTML = `
             <h4>Data Summary</h4>
             <div class="metadata-item">
-                <span>Orders:</span> <strong>${metadata.order_count?.toLocaleString() || 0}</strong>
+                <span>Orders:</span> <strong>${metadata?.order_count?.toLocaleString() || 0}</strong>
             </div>
             <div class="metadata-item">
-                <span>Vendors:</span> <strong>${metadata.vendor_count?.toLocaleString() || 0}</strong>
+                <span>Vendors:</span> <strong>${metadata?.vendor_count?.toLocaleString() || 0}</strong>
             </div>
             <div class="metadata-item">
-                <span>Generated:</span> <small>${new Date(metadata.generated_at).toLocaleString()}</small>
+                <span>Generated:</span> <small>${metadata?.generated_at ? new Date(metadata.generated_at).toLocaleString() : 'Unknown'}</small>
             </div>
         `;
+    }
+
+    // All other utility functions
+    function populateCitySelect() {
+        if (!initialFilterData || !initialFilterData.cities) return;
+        populateSelectWithOptions(cityEl, initialFilterData.cities.map(c => ({ value: c.name, text: c.name })), false);
+        cityEl.value = "tehran";
+    }
+
+    function initializeCustomDropdowns() {
+        if (!initialFilterData) return;
+        
+        customFilterConfigs.businessLine.optionsData = (initialFilterData.business_lines || [])
+            .map(bl => ({ value: bl, text: bl, checked: false }));
+        renderCustomDropdown(customFilterConfigs.businessLine);
+        
+        customFilterConfigs.vendorStatus.optionsData = (initialFilterData.vendor_statuses || [])
+            .map(s => ({ value: String(s), text: `Status ${s}`, checked: false }));
+        renderCustomDropdown(customFilterConfigs.vendorStatus);
+        
+        customFilterConfigs.vendorGrade.optionsData = (initialFilterData.vendor_grades || [])
+            .map(g => ({ value: g, text: g, checked: false }));
+        renderCustomDropdown(customFilterConfigs.vendorGrade);
+        
+        updateCityDependentCustomFilters(cityEl.value);
+        updateVendorAreaSubTypeFilter();
+    }
+
+    function applyDefaultFilters() {
+        const statusConfig = customFilterConfigs.vendorStatus;
+        const status5Option = statusConfig.optionsData.find(opt => opt.value === "5");
+        if (status5Option) status5Option.checked = true;
+        updateCustomDropdownButtonText(statusConfig);
+        
+        const gradeConfig = customFilterConfigs.vendorGrade;
+        ["A", "A+"].forEach(gradeValue => {
+            const gradeOption = gradeConfig.optionsData.find(opt => opt.value === gradeValue);
+            if (gradeOption) gradeOption.checked = true;
+        });
+        updateCustomDropdownButtonText(gradeConfig);
+        
+        const blConfig = customFilterConfigs.businessLine;
+        const restaurantOption = blConfig.optionsData.find(opt => opt.value && opt.value.toLowerCase() === "restaurant");
+        if (restaurantOption) restaurantOption.checked = true;
+        updateCustomDropdownButtonText(blConfig);
+        
+        vendorVisibleEl.value = "1";
+    }
+
+    function updateCityDependentCustomFilters(selectedCity) {
+        updateAreaSubTypeCustomFilter();
+    }
+
+    function updateAreaSubTypeCustomFilter() {
+        if (!initialFilterData) return;
+        const selectedAreaMainType = areaMainTypeEl.value;
+        const selectedCity = cityEl.value;
+        let subAreaOptionObjects = [];
+        
+        if (selectedAreaMainType === "coverage_grid") {
+            if (initialFilterData.marketing_areas_by_city && initialFilterData.marketing_areas_by_city[selectedCity]) {
+                subAreaOptionObjects = initialFilterData.marketing_areas_by_city[selectedCity].map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+            }
+        } else if (selectedAreaMainType === "tapsifood_marketing_areas") {
+            if (initialFilterData.marketing_areas_by_city && initialFilterData.marketing_areas_by_city[selectedCity]) {
+                subAreaOptionObjects = initialFilterData.marketing_areas_by_city[selectedCity].map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+            }
+        } else if (selectedCity === "tehran") {
+            if (selectedAreaMainType === "tehran_region_districts" && initialFilterData.tehran_region_districts) {
+                subAreaOptionObjects = initialFilterData.tehran_region_districts.map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+            } else if (selectedAreaMainType === "tehran_main_districts" && initialFilterData.tehran_main_districts) {
+                subAreaOptionObjects = initialFilterData.tehran_main_districts.map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+            } else if (selectedAreaMainType === "all_tehran_districts") {
+                const regionD = (initialFilterData.tehran_region_districts || []).map(name => ({value: name, text: `Region: ${decodeURIComponentSafe(name)}`}));
+                const mainD = (initialFilterData.tehran_main_districts || []).map(name => ({value: name, text: `Main: ${decodeURIComponentSafe(name)}`}));
+                subAreaOptionObjects = [...regionD, ...mainD];
+            }
+        }
+        
+        customFilterConfigs.areaSubType.optionsData = subAreaOptionObjects
+            .map(opt => ({ value: opt.value, text: opt.text, checked: false }));
+        renderCustomDropdown(customFilterConfigs.areaSubType);
+    }
+
+    function updateVendorAreaSubTypeFilter() {
+        if (!initialFilterData) return;
+        const selectedVendorAreaType = vendorAreaMainTypeEl.value;
+        const selectedCity = cityEl.value; 
+        let subAreaOptionObjects = [];
+        
+        if (selectedVendorAreaType === "tapsifood_marketing_areas") {
+             if (initialFilterData.marketing_areas_by_city && initialFilterData.marketing_areas_by_city[selectedCity]) {
+                subAreaOptionObjects = initialFilterData.marketing_areas_by_city[selectedCity].map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+            }
+        } else if (selectedVendorAreaType === "tehran_region_districts" && initialFilterData.tehran_region_districts) {
+            subAreaOptionObjects = initialFilterData.tehran_region_districts.map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+        } else if (selectedVendorAreaType === "tehran_main_districts" && initialFilterData.tehran_main_districts) {
+            subAreaOptionObjects = initialFilterData.tehran_main_districts.map(name => ({ value: name, text: decodeURIComponentSafe(name) }));
+        }
+        
+        customFilterConfigs.vendorAreaSubType.optionsData = subAreaOptionObjects
+            .map(opt => ({ value: opt.value, text: opt.text, checked: false }));
+        renderCustomDropdown(customFilterConfigs.vendorAreaSubType);
+    }
+
+    function decodeURIComponentSafe(str) {
+        if (!str) return str;
+        try {
+            return decodeURIComponent(str.replace(/\+/g, ' ')); 
+        } catch (e) {
+            console.warn(`Failed to decode URI component: ${str}`, e);
+            return str;
+        }
+    }
+
+    function populateSelectWithOptions(selectElement, options, isMultiple = true) {
+        selectElement.innerHTML = '';
+        options.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.text;
+            selectElement.add(option);
+        });
+    }
+
+    function renderCustomDropdown(config) {
+        config.panel.innerHTML = '';
+        if (!config.optionsData || config.optionsData.length === 0) {
+            config.panel.innerHTML = '<div class="dropdown-panel-item" style="color:var(--text-muted); cursor:default;">No options available</div>';
+            updateCustomDropdownButtonText(config);
+            return;
+        }
+        
+        config.optionsData.forEach((option, index) => {
+            const itemDiv = document.createElement('div');
+            itemDiv.classList.add('dropdown-panel-item');
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.id = `${config.paramName}-opt-${index}-${Math.random().toString(36).substr(2, 5)}`;
+            checkbox.value = option.value;
+            checkbox.checked = option.checked;
+            
+            const label = document.createElement('label');
+            label.htmlFor = checkbox.id;
+            label.textContent = option.text;
+            
+            checkbox.addEventListener('change', () => {
+                option.checked = checkbox.checked;
+                updateCustomDropdownButtonText(config);
+            });
+            
+            itemDiv.addEventListener('click', (e) => {
+                 if (e.target !== checkbox) checkbox.click();
+            });
+            
+            itemDiv.appendChild(checkbox);
+            itemDiv.appendChild(label);
+            config.panel.appendChild(itemDiv);
+        });
+        updateCustomDropdownButtonText(config);
+    }
+
+    function updateCustomDropdownButtonText(config) {
+        const selectedOptions = config.optionsData.filter(opt => opt.checked);
+        const selectedCount = selectedOptions.length;
+        if (selectedCount === 0) {
+            config.button.textContent = config.defaultText;
+        } else if (selectedCount === 1) {
+            const selectedOptText = selectedOptions[0].text;
+            config.button.textContent = selectedOptText.length > 20 ? selectedOptText.substring(0,18) + "..." : selectedOptText;
+        } else {
+            config.button.textContent = `${selectedCount} selected`;
+        }
+    }
+
+    function getSelectedValuesFromCustomDropdown(config) {
+        return config.optionsData.filter(opt => opt.checked).map(opt => opt.value);
+    }
+
+    function toggleDropdown(config, forceClose = false) {
+        const isOpen = config.panel.classList.contains('open');
+        if (forceClose || isOpen) {
+            config.panel.classList.remove('open');
+            config.button.classList.remove('open');
+        } else {
+            Object.values(customFilterConfigs).forEach(otherConfig => {
+                if (otherConfig !== config) toggleDropdown(otherConfig, true);
+            });
+            config.panel.classList.add('open');
+            config.button.classList.add('open');
+        }
+    }
+
+    function updateVendorIconSize(baseSize) { 
+        const aspectRatio = 41/25;
+        const iconWidth = parseInt(baseSize);
+        const iconHeight = parseInt(iconWidth * aspectRatio);
+        defaultVendorIcon = L.icon({
+            iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+            iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+            iconSize: [iconWidth, iconHeight],
+            iconAnchor: [iconWidth / 2, iconHeight],
+            popupAnchor: [0, -iconHeight + 5],
+            shadowSize: [iconWidth * 1.5, iconHeight * 1.5],
+            shadowAnchor: [iconWidth / 3, iconHeight*1.4]
+        });
+        markerSizeValueEl.textContent = baseSize;
+        if(vendorsAreVisible) redrawVendorMarkersAndRadii();
+    }
+
+    function adjustMapView() {
+        let bounds;
+        const hasVisibleVendors = vendorsAreVisible && vendorLayerGroup.getLayers().length > 0;
+        const hasVisiblePolygons = map.hasLayer(polygonLayerGroup) && polygonLayerGroup.getLayers().length > 0;
+        const hasVisibleCoverage = coverageGridLayerGroup.getLayers().length > 0;
+        
+        let allVisibleLayers = L.featureGroup();
+        if (hasVisibleVendors) allVisibleLayers.addLayer(vendorLayerGroup);
+        if (hasVisiblePolygons) allVisibleLayers.addLayer(polygonLayerGroup);
+        if (hasVisibleCoverage) allVisibleLayers.addLayer(coverageGridLayerGroup);
+        
+        if (allVisibleLayers.getLayers().length > 0) {
+            bounds = allVisibleLayers.getBounds();
+        }
+        
+        if (bounds && bounds.isValid()) {
+            map.fitBounds(bounds, {padding: [50, 50]});
+        } else if (cityEl.value === "tehran") {
+            map.setView([35.7219, 51.3347], 11);
+        } else if (cityEl.value === "mashhad") {
+            map.setView([36.297, 59.606], 12);
+        } else if (cityEl.value === "shiraz") {
+            map.setView([29.5918, 52.5837], 12);
+        }
+    }
+
+    function applyGridVisualizationEffects() {
+        const blur = gridBlurEl.value;
+        const fade = gridFadeEl.value / 100;
+        
+        const coveragePane = map.getPane('coverageGridPane');
+        if (coveragePane) {
+            coveragePane.style.filter = `blur(${blur}px)`;
+            coveragePane.style.opacity = fade;
+        }
+    }
+
+    function updateLayerOrder() {
+        if (marketingAreasOnTop) {
+            map.getPane('polygonPane').style.zIndex = 470;
+            map.getPane('coverageGridPane').style.zIndex = 460;
+        } else {
+            map.getPane('polygonPane').style.zIndex = 450;
+            map.getPane('coverageGridPane').style.zIndex = 460;
+        }
+    }
+
+    function setActiveMapTypeButton(activeTypeKey) {
+        Object.values(mapTypeButtons).forEach(btn => btn.classList.remove('active-map-type'));
+        if (activeTypeKey && mapTypeButtons[activeTypeKey]) {
+            mapTypeButtons[activeTypeKey].classList.add('active-map-type');
+        }
+    }
+
+    function showLoading(isLoading, message = 'LOADING ...') {
+        if (isLoading) {
+            bodyEl.classList.add('is-loading');
+            globalLoadingOverlayEl.textContent = message;
+            globalLoadingOverlayEl.classList.add('visible');
+        } else {
+            bodyEl.classList.remove('is-loading');
+            globalLoadingOverlayEl.classList.remove('visible');
+        }
     }
 
     // Enhanced notification system
@@ -522,7 +1320,6 @@ document.addEventListener('DOMContentLoaded', () => {
             <button onclick="this.parentElement.remove()">×</button>
         `;
         
-        // Style the notification
         notification.style.cssText = `
             position: fixed;
             top: 20px;
@@ -541,7 +1338,6 @@ document.addEventListener('DOMContentLoaded', () => {
         
         document.body.appendChild(notification);
         
-        // Auto-remove after 5 seconds
         setTimeout(() => {
             if (notification.parentElement) {
                 notification.remove();
@@ -549,107 +1345,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 5000);
     }
 
-    // Admin functions for production monitoring
-    async function refreshData() {
-        try {
-            showLoading(true, 'Triggering data refresh...');
-            const result = await apiCall(`${API_BASE_URL}/admin/refresh-data`, { method: 'POST' });
-            showNotification(`Data refresh triggered: ${result.task_id}`, 'success');
-        } catch (error) {
-            showNotification(`Failed to trigger refresh: ${error.message}`, 'error');
-        } finally {
-            showLoading(false);
-        }
-    }
-
-    async function warmCache() {
-        try {
-            showLoading(true, 'Warming cache...');
-            const result = await apiCall(`${API_BASE_URL}/admin/warm-cache`, { method: 'POST' });
-            showNotification('Cache warming triggered', 'success');
-        } catch (error) {
-            showNotification(`Failed to warm cache: ${error.message}`, 'error');
-        } finally {
-            showLoading(false);
-        }
-    }
-
-    // Expose admin functions globally for console access
-    window.dashboardAdmin = {
-        refreshData,
-        warmCache,
-        checkHealth: checkSystemHealth,
-        clearCache: async () => {
-            try {
-                await apiCall(`${API_BASE_URL}/admin/cache`, { method: 'DELETE' });
-                showNotification('Cache cleared', 'success');
-            } catch (error) {
-                showNotification(`Failed to clear cache: ${error.message}`, 'error');
-            }
-        }
-    };
-
-    // Keep existing functions but ensure they work with new API
-    // [Previous functions like initMap, setupEventListeners, etc. remain the same]
-    // Just update any API calls to use the new apiCall function and endpoints
-
-    function initMap() {
-        const mapContainer = document.getElementById('map');
-        if (mapContainer) mapContainer.innerHTML = '';
-        
-        map = L.map('map', { 
-            preferCanvas: true,
-            attributionControl: false 
-        }).setView([35.7219, 51.3347], 11);
-        
-        // Create panes for layer ordering
-        map.createPane('polygonPane');
-        map.getPane('polygonPane').style.zIndex = 450;
-        
-        map.createPane('coverageGridPane');
-        map.getPane('coverageGridPane').style.zIndex = 460;
-        
-        map.getPane('shadowPane').style.zIndex = 250;
-        
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-            attribution: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
-            maxZoom: 20
-        }).addTo(map);
-        
-        L.control.attribution({position: 'bottomleft'}).addTo(map);
-        
-        if (vendorsAreVisible) vendorLayerGroup.addTo(map);
-        polygonLayerGroup.addTo(map);
-        coverageGridLayerGroup.addTo(map);
-    }
-
-    function setupHeatmapZoomHandler() {
-        let zoomTimeout;
-        
-        map.on('zoomend', () => {
-            const newZoomLevel = map.getZoom();
-            if (Math.abs(newZoomLevel - currentZoomLevel) >= 0.5) {
-                currentZoomLevel = newZoomLevel;
-                
-                if (zoomTimeout) clearTimeout(zoomTimeout);
-                
-                zoomTimeout = setTimeout(() => {
-                    if (currentHeatmapType !== 'none' && heatmapLayer) {
-                        // Re-render heatmap with new zoom-optimized parameters
-                        const newRadius = getOptimalHeatmapRadius();
-                        if (heatmapLayer.setOptions) {
-                            heatmapLayer.setOptions({ radius: newRadius });
-                        }
-                    }
-                }, 200);
-            }
-        });
-    }
-
     // Initialize UI components
     function initializeUIComponents() {
-        // Add pagination styles
         const style = document.createElement('style');
         style.textContent = `
             .pagination-controls {
@@ -692,89 +1389,323 @@ document.addEventListener('DOMContentLoaded', () => {
         document.head.appendChild(style);
     }
 
-    // Enhanced error handling for legacy function compatibility
-    function handleLegacyFunctions() {
-        // Map type buttons with new API
-        const mapTypeButtons = {
-            densityTotal: document.getElementById('btn-order-density-total'),
-            densityOrganic: document.getElementById('btn-order-density-organic'),
-            densityNonOrganic: document.getElementById('btn-order-density-non-organic'),
-            userDensity: document.getElementById('btn-user-density-heatmap'),
-            population: document.getElementById('btn-population-heatmap'),
-            vendors: document.getElementById('btn-vendors-map'),
-        };
+    // Additional event listeners for heatmap controls
+    function setupAdditionalHeatmapListeners() {
+        const autoOptimizeBtn = document.getElementById('heatmap-auto-optimize');
+        if (autoOptimizeBtn) {
+            autoOptimizeBtn.addEventListener('click', () => {
+                heatmapConfig.autoOptimize = !heatmapConfig.autoOptimize;
+                autoOptimizeBtn.textContent = heatmapConfig.autoOptimize ? 'Auto-Optimize On' : 'Auto-Optimize Off';
+                autoOptimizeBtn.classList.toggle('active', heatmapConfig.autoOptimize);
+                
+                if (heatmapConfig.autoOptimize && currentHeatmapType !== 'none' && lastHeatmapData) {
+                    renderCurrentHeatmap();
+                }
+            });
+        }
 
-        Object.keys(mapTypeButtons).forEach(type => {
-            const button = mapTypeButtons[type];
-            if (button) {
-                button.addEventListener('click', () => {
-                    const typeMapping = {
-                        densityTotal: 'order_density',
-                        densityOrganic: 'order_density_organic',
-                        densityNonOrganic: 'order_density_non_organic',
-                        userDensity: 'user_density',
-                        population: 'population',
-                        vendors: 'none'
-                    };
-                    currentHeatmapType = typeMapping[type] || 'none';
-                    setActiveMapTypeButton(type);
-                    fetchAndDisplayMapData();
-                });
-            }
-        });
-    }
+        const smoothTransitionsBtn = document.getElementById('heatmap-smooth-transitions');
+        if (smoothTransitionsBtn) {
+            smoothTransitionsBtn.addEventListener('click', () => {
+                heatmapConfig.smoothTransitions = !heatmapConfig.smoothTransitions;
+                smoothTransitionsBtn.textContent = heatmapConfig.smoothTransitions ? 'Smooth On' : 'Smooth Off';
+                smoothTransitionsBtn.classList.toggle('active', heatmapConfig.smoothTransitions);
+            });
+        }
 
-    // Keep all existing utility functions but add error handling
-    function showLoading(isLoading, message = 'LOADING ...') {
-        if (isLoading) {
-            bodyEl.classList.add('is-loading');
-            globalLoadingOverlayEl.textContent = message;
-            globalLoadingOverlayEl.classList.add('visible');
-        } else {
-            bodyEl.classList.remove('is-loading');
-            globalLoadingOverlayEl.classList.remove('visible');
+        const resetParamsBtn = document.getElementById('heatmap-reset-params');
+        if (resetParamsBtn) {
+            resetParamsBtn.addEventListener('click', () => {
+                heatmapConfig.autoOptimize = true;
+                heatmapConfig.smoothTransitions = true;
+                
+                if (autoOptimizeBtn) {
+                    autoOptimizeBtn.textContent = 'Auto-Optimize On';
+                    autoOptimizeBtn.classList.add('active');
+                }
+                
+                if (smoothTransitionsBtn) {
+                    smoothTransitionsBtn.textContent = 'Smooth On';
+                    smoothTransitionsBtn.classList.add('active');
+                }
+                
+                heatmapConfig.baseRadius = 25;
+                heatmapConfig.baseBlur = 15;
+                heatmapConfig.maxIntensity = 1.0;
+                
+                if (currentHeatmapType !== 'none' && lastHeatmapData) {
+                    renderCurrentHeatmap();
+                }
+            });
         }
     }
 
-    // Placeholder functions for custom dropdowns (implement based on existing code)
-    function getSelectedValuesFromCustomDropdown(config) {
-        // Implementation should match your existing custom dropdown logic
-        return [];
-    }
-
-    function populateCitySelect() {
-        // Implementation from existing code
-    }
-
-    function initializeCustomDropdowns() {
-        // Implementation from existing code
-    }
-
-    function applyDefaultFilters() {
-        // Implementation from existing code
-    }
-
     function setupEventListeners() {
-        // Implementation from existing code + new handlers
         applyFiltersBtn.addEventListener('click', fetchAndDisplayMapData);
-        handleLegacyFunctions();
+        
+        cityEl.addEventListener('change', (e) => {
+            updateCityDependentCustomFilters(e.target.value);
+            updateVendorAreaSubTypeFilter();
+        });
+        
+        areaMainTypeEl.addEventListener('change', () => {
+            updateAreaSubTypeCustomFilter();
+        });
+        
+        vendorAreaMainTypeEl.addEventListener('change', updateVendorAreaSubTypeFilter);
+        
+        // Lat/Lng finder
+        btnFindLocation.addEventListener('click', () => {
+            const lat = parseFloat(latFinderInputEl.value);
+            const lng = parseFloat(lngFinderInputEl.value);
+            if (isNaN(lat) || isNaN(lng)) {
+                alert('Please enter valid numbers for Latitude and Longitude.');
+                return;
+            }
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                alert('Latitude must be between -90 and 90.\nLongitude must be between -180 and 180.');
+                return;
+            }
+            
+            if (tempLocationMarker) {
+                map.removeLayer(tempLocationMarker);
+            }
+            
+            map.flyTo([lat, lng], 16);
+            
+            tempLocationMarker = L.circleMarker([lat, lng], {
+                color: '#f44336',
+                radius: 10,
+                weight: 3,
+                opacity: 1,
+                fillOpacity: 0.5,
+                pane: 'markerPane'
+            }).bindPopup(`<b>Location</b><br>Lat: ${lat}<br>Lng: ${lng}`).addTo(map).openPopup();
+        });
+        
+        // Map type buttons
+        Object.keys(mapTypeButtons).forEach(type => {
+            const button = mapTypeButtons[type];
+            button.addEventListener('click', () => {
+                const typeMapping = {
+                    densityTotal: 'order_density',
+                    densityOrganic: 'order_density_organic',
+                    densityNonOrganic: 'order_density_non_organic',
+                    userDensity: 'user_density',
+                    population: 'population',
+                    vendors: 'none'
+                };
+                currentHeatmapType = typeMapping[type] || 'none';
+                setActiveMapTypeButton(type);
+                fetchAndDisplayMapData();
+            });
+        });
+        
+        btnToggleVendors.addEventListener('click', () => {
+            vendorsAreVisible = !vendorsAreVisible;
+            btnToggleVendors.textContent = vendorsAreVisible ? 'Vendors On' : 'Vendors Off';
+            btnToggleVendors.classList.toggle('active', vendorsAreVisible);
+            if (vendorsAreVisible) {
+                if (!map.hasLayer(vendorLayerGroup)) map.addLayer(vendorLayerGroup);
+            } else {
+                if (map.hasLayer(vendorLayerGroup)) map.removeLayer(vendorLayerGroup);
+            }
+        });
+        
+        btnClearHeatmap.addEventListener('click', () => {
+            currentHeatmapType = 'none';
+            setActiveMapTypeButton(null);
+            if (heatmapLayer) { map.removeLayer(heatmapLayer); heatmapLayer = null; }
+        });
+        
+        // Custom dropdown events
+        Object.values(customFilterConfigs).forEach(config => {
+            config.button.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleDropdown(config);
+            });
+        });
+        
+        document.addEventListener('click', (e) => {
+            Object.values(customFilterConfigs).forEach(config => {
+                if (config.button && !config.button.contains(e.target) && config.panel && !config.panel.contains(e.target)) {
+                    toggleDropdown(config, true);
+                }
+            });
+        });
+        
+        // Vendor controls
+        vendorRadiusToggleBtn.addEventListener('click', () => {
+            showVendorRadius = !showVendorRadius;
+            vendorRadiusToggleBtn.textContent = showVendorRadius ? 'Hide Radius' : 'Show Radius';
+            vendorRadiusToggleBtn.classList.toggle('active', showVendorRadius);
+            redrawVendorRadii();
+        });
+        
+        // Radius modifier controls
+        radiusModeSelector.addEventListener('change', (e) => {
+            currentRadiusMode = e.target.value;
+            if (currentRadiusMode === 'fixed') {
+                radiusPercentageControl.style.display = 'none';
+                radiusFixedControl.style.display = 'block';
+            } else {
+                radiusPercentageControl.style.display = 'block';
+                radiusFixedControl.style.display = 'none';
+            }
+        });
+        
+        vendorRadiusModifierEl.addEventListener('input', (e) => {
+            const value = e.target.value;
+            radiusModifierValueEl.textContent = value;
+            currentRadiusModifier = parseInt(value) / 100;
+        });
+        
+        vendorRadiusFixedEl.addEventListener('input', (e) => {
+            const value = e.target.value;
+            radiusFixedValueEl.textContent = value;
+            currentRadiusFixed = parseFloat(value);
+        });
+        
+        btnResetRadius.addEventListener('click', () => {
+            vendorRadiusModifierEl.value = "100";
+            radiusModifierValueEl.textContent = "100";
+            currentRadiusModifier = 1.0;
+            vendorRadiusFixedEl.value = "3";
+            radiusFixedValueEl.textContent = "3";
+            currentRadiusFixed = 3.0;
+            fetchAndDisplayMapData();
+        });
+        
+        // Grid visualization controls
+        gridBlurEl.addEventListener('input', (e) => {
+            gridBlurValueEl.textContent = e.target.value;
+            applyGridVisualizationEffects();
+        });
+        
+        gridFadeEl.addEventListener('input', (e) => {
+            gridFadeValueEl.textContent = e.target.value;
+            applyGridVisualizationEffects();
+        });
+        
+        gridPointSizeEl.addEventListener('input', (e) => {
+            gridPointSizeValueEl.textContent = e.target.value;
+            if (areaMainTypeEl.value === 'coverage_grid') {
+                drawCoverageGrid();
+            }
+        });
+        
+        marketingAreasOnTopBtn.addEventListener('click', () => {
+            marketingAreasOnTop = !marketingAreasOnTop;
+            marketingAreasOnTopBtn.textContent = marketingAreasOnTop ? 'On' : 'Off';
+            marketingAreasOnTopBtn.classList.toggle('active', marketingAreasOnTop);
+    
+            if (marketingAreasOnTop) {
+                restylePolygons();
+                if (!map.hasLayer(polygonLayerGroup)) {
+                    map.addLayer(polygonLayerGroup);
+                }
+            } else {
+                if (map.hasLayer(polygonLayerGroup)) {
+                    map.removeLayer(polygonLayerGroup);
+                }
+            }
+            updateLayerOrder();
+        });
+        
+        // Style controls
+        radiusEdgeColorEl.addEventListener('input', redrawVendorRadii);
+        radiusInnerColorEl.addEventListener('input', redrawVendorRadii);
+        radiusInnerNoneEl.addEventListener('change', redrawVendorRadii);
+        areaFillColorEl.addEventListener('input', restylePolygons);
+        areaFillNoneEl.addEventListener('change', restylePolygons);
+        vendorMarkerSizeEl.addEventListener('input', (e) => updateVendorIconSize(e.target.value));
+        
+        // Enhanced heatmap control event listeners
+        heatmapRadiusEl.addEventListener('input', (e) => {
+            heatmapRadiusValueEl.textContent = e.target.value;
+            heatmapConfig.autoOptimize = false;
+            heatmapConfig.baseRadius = parseInt(e.target.value);
+            
+            const autoOptimizeBtn = document.getElementById('heatmap-auto-optimize');
+            if (autoOptimizeBtn) {
+                autoOptimizeBtn.textContent = 'Auto-Optimize Off';
+                autoOptimizeBtn.classList.remove('active');
+            }
+            
+            renderCurrentHeatmap();
+        });
+
+        heatmapBlurEl.addEventListener('input', (e) => {
+            heatmapBlurValueEl.textContent = e.target.value;
+            heatmapConfig.autoOptimize = false;
+            heatmapConfig.baseBlur = parseInt(e.target.value);
+            
+            const autoOptimizeBtn = document.getElementById('heatmap-auto-optimize');
+            if (autoOptimizeBtn) {
+                autoOptimizeBtn.textContent = 'Auto-Optimize Off';
+                autoOptimizeBtn.classList.remove('active');
+            }
+            
+            renderCurrentHeatmap();
+        });
+
+        heatmapMaxValEl.addEventListener('input', (e) => {
+            heatmapMaxValValueEl.textContent = e.target.value;
+            heatmapConfig.autoOptimize = false;
+            heatmapConfig.maxIntensity = parseFloat(e.target.value);
+            
+            const autoOptimizeBtn = document.getElementById('heatmap-auto-optimize');
+            if (autoOptimizeBtn) {
+                autoOptimizeBtn.textContent = 'Auto-Optimize Off';
+                autoOptimizeBtn.classList.remove('active');
+            }
+            
+            renderCurrentHeatmap();
+        });
+
+        // Setup additional controls
+        setupAdditionalHeatmapListeners();
     }
 
-    function setActiveMapTypeButton(type) {
-        // Implementation from existing code
+    // Admin functions for production monitoring
+    async function refreshData() {
+        try {
+            showLoading(true, 'Triggering data refresh...');
+            const result = await apiCall(`${API_BASE_URL}/admin/refresh-data`, { method: 'POST' });
+            showNotification(`Data refresh triggered: ${result.task_id}`, 'success');
+        } catch (error) {
+            showNotification(`Failed to trigger refresh: ${error.message}`, 'error');
+        } finally {
+            showLoading(false);
+        }
     }
 
-    function adjustMapView() {
-        // Implementation from existing code
+    async function warmCache() {
+        try {
+            showLoading(true, 'Warming cache...');
+            const result = await apiCall(`${API_BASE_URL}/admin/warm-cache`, { method: 'POST' });
+            showNotification('Cache warming triggered', 'success');
+        } catch (error) {
+            showNotification(`Failed to warm cache: ${error.message}`, 'error');
+        } finally {
+            showLoading(false);
+        }
     }
 
-    function addPolygonsToMap(polygonsData) {
-        // Implementation from existing code
-    }
-
-    function addCoverageGridToMap(gridData) {
-        // Implementation from existing code
-    }
+    // Expose admin functions globally for console access
+    window.dashboardAdmin = {
+        refreshData,
+        warmCache,
+        checkHealth: checkSystemHealth,
+        clearCache: async () => {
+            try {
+                await apiCall(`${API_BASE_URL}/admin/cache`, { method: 'DELETE' });
+                showNotification('Cache cleared', 'success');
+            } catch (error) {
+                showNotification(`Failed to clear cache: ${error.message}`, 'error');
+            }
+        }
+    };
 
     // Start the application
     init();
