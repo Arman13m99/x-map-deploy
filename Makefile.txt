@@ -1,0 +1,273 @@
+# Makefile - TapsiFood Dashboard Deployment Automation
+
+.PHONY: help install dev-install build test deploy deploy-prod clean logs status backup restore
+
+# Default target
+help: ## Show this help message
+	@echo "TapsiFood Dashboard - Production Deployment"
+	@echo "=========================================="
+	@echo ""
+	@echo "Available commands:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+# Environment setup
+install: ## Install production dependencies
+	@echo "🔧 Installing production dependencies..."
+	pip install -r production_requirements.txt
+	@echo "✅ Dependencies installed"
+
+dev-install: ## Install development dependencies
+	@echo "🔧 Installing development dependencies..."
+	pip install -r requirements.txt
+	pip install -r production_requirements.txt
+	@echo "✅ Development environment ready"
+
+# Database operations
+init-db: ## Initialize database with tables and data
+	@echo "🗄️ Initializing database..."
+	python scripts/init_db.py --full-setup
+	@echo "✅ Database initialized"
+
+migrate-db: ## Migrate data from old system
+	@echo "🔄 Migrating data..."
+	python scripts/init_db.py --migrate-data --force-refresh
+	@echo "✅ Data migration completed"
+
+verify-db: ## Verify database installation
+	@echo "🔍 Verifying database..."
+	python scripts/init_db.py --verify
+	@echo "✅ Database verification completed"
+
+# Docker operations
+build: ## Build Docker images
+	@echo "🐳 Building Docker images..."
+	docker-compose -f docker-compose.prod.yml build
+	@echo "✅ Docker images built"
+
+build-no-cache: ## Build Docker images without cache
+	@echo "🐳 Building Docker images (no cache)..."
+	docker-compose -f docker-compose.prod.yml build --no-cache
+	@echo "✅ Docker images built"
+
+# Development deployment
+dev: ## Start development environment
+	@echo "🚀 Starting development environment..."
+	docker-compose up -d postgres redis
+	@sleep 10
+	python backend/api.py
+	@echo "✅ Development environment started"
+
+dev-down: ## Stop development environment
+	@echo "🛑 Stopping development environment..."
+	docker-compose down
+	@echo "✅ Development environment stopped"
+
+# Production deployment
+deploy: ## Deploy to production (single server)
+	@echo "🚀 Deploying to production..."
+	@make build
+	@make deploy-services
+	@make init-db
+	@make health-check
+	@echo "✅ Production deployment completed"
+
+deploy-services: ## Deploy services only
+	@echo "🚀 Deploying services..."
+	docker-compose -f docker-compose.prod.yml up -d
+	@echo "⏳ Waiting for services to start..."
+	@sleep 30
+	@echo "✅ Services deployed"
+
+deploy-prod: ## Deploy with production profile including monitoring
+	@echo "🚀 Deploying with monitoring..."
+	docker-compose -f docker-compose.prod.yml --profile monitoring up -d
+	@echo "✅ Production deployment with monitoring completed"
+
+scale: ## Scale web services (use with REPLICAS=n)
+	@echo "📈 Scaling web services to $(REPLICAS) replicas..."
+	docker-compose -f docker-compose.prod.yml up -d --scale web=$(REPLICAS)
+	@echo "✅ Scaling completed"
+
+# Service management
+start: ## Start all services
+	@echo "▶️ Starting services..."
+	docker-compose -f docker-compose.prod.yml start
+	@echo "✅ Services started"
+
+stop: ## Stop all services
+	@echo "⏹️ Stopping services..."
+	docker-compose -f docker-compose.prod.yml stop
+	@echo "✅ Services stopped"
+
+restart: ## Restart all services
+	@echo "🔄 Restarting services..."
+	docker-compose -f docker-compose.prod.yml restart
+	@echo "✅ Services restarted"
+
+restart-web: ## Restart web services only
+	@echo "🔄 Restarting web services..."
+	docker-compose -f docker-compose.prod.yml restart web nginx
+	@echo "✅ Web services restarted"
+
+restart-workers: ## Restart worker services only
+	@echo "🔄 Restarting worker services..."
+	docker-compose -f docker-compose.prod.yml restart worker scheduler
+	@echo "✅ Worker services restarted"
+
+# Health and monitoring
+health-check: ## Check system health
+	@echo "🏥 Checking system health..."
+	@sleep 10
+	@curl -f http://localhost/api/v2/health || (echo "❌ Health check failed" && exit 1)
+	@echo "✅ System healthy"
+
+status: ## Show service status
+	@echo "📊 Service Status:"
+	@docker-compose -f docker-compose.prod.yml ps
+	@echo ""
+	@echo "🏥 Health Status:"
+	@curl -s http://localhost/api/v2/health | python -m json.tool || echo "❌ API not responding"
+
+logs: ## Show service logs
+	@echo "📋 Service Logs:"
+	docker-compose -f docker-compose.prod.yml logs --tail=100 -f
+
+logs-web: ## Show web service logs
+	@echo "📋 Web Service Logs:"
+	docker-compose -f docker-compose.prod.yml logs --tail=100 -f web nginx
+
+logs-worker: ## Show worker service logs
+	@echo "📋 Worker Service Logs:"
+	docker-compose -f docker-compose.prod.yml logs --tail=100 -f worker scheduler
+
+logs-db: ## Show database logs
+	@echo "📋 Database Logs:"
+	docker-compose -f docker-compose.prod.yml logs --tail=100 -f postgres
+
+# Data operations
+backup: ## Backup database
+	@echo "💾 Creating database backup..."
+	@mkdir -p backups
+	@docker-compose -f docker-compose.prod.yml exec postgres pg_dump -U dashboard_user tapsifood_dashboard > backups/backup_$(shell date +%Y%m%d_%H%M%S).sql
+	@echo "✅ Database backed up to backups/"
+
+restore: ## Restore database from backup (use with BACKUP_FILE=filename)
+	@echo "🔄 Restoring database from $(BACKUP_FILE)..."
+	@docker-compose -f docker-compose.prod.yml exec -T postgres psql -U dashboard_user tapsifood_dashboard < $(BACKUP_FILE)
+	@echo "✅ Database restored"
+
+export-data: ## Export current data to CSV
+	@echo "📤 Exporting data..."
+	python scripts/export_data.py
+	@echo "✅ Data exported to exports/"
+
+# Cache operations
+clear-cache: ## Clear Redis cache
+	@echo "🧹 Clearing cache..."
+	docker-compose -f docker-compose.prod.yml exec redis redis-cli FLUSHALL
+	@echo "✅ Cache cleared"
+
+warm-cache: ## Warm up cache
+	@echo "🔥 Warming cache..."
+	curl -X POST http://localhost/api/v2/admin/warm-cache
+	@echo "✅ Cache warmed"
+
+# Maintenance
+refresh-data: ## Trigger manual data refresh
+	@echo "🔄 Triggering data refresh..."
+	curl -X POST http://localhost/api/v2/admin/refresh-data
+	@echo "✅ Data refresh triggered"
+
+clean: ## Clean up Docker resources
+	@echo "🧹 Cleaning up..."
+	docker-compose -f docker-compose.prod.yml down --volumes --remove-orphans
+	docker system prune -f
+	@echo "✅ Cleanup completed"
+
+clean-all: ## Clean up everything including images
+	@echo "🧹 Deep cleaning..."
+	docker-compose -f docker-compose.prod.yml down --volumes --remove-orphans --rmi all
+	docker system prune -af
+	@echo "✅ Deep cleanup completed"
+
+# Testing
+test: ## Run tests
+	@echo "🧪 Running tests..."
+	pytest tests/ -v --cov=backend
+	@echo "✅ Tests completed"
+
+test-api: ## Test API endpoints
+	@echo "🧪 Testing API endpoints..."
+	python scripts/test_api.py
+	@echo "✅ API tests completed"
+
+# Security
+security-scan: ## Run security scan
+	@echo "🔒 Running security scan..."
+	docker run --rm -v $(PWD):/src sonarqube/sonar-scanner-cli
+	@echo "✅ Security scan completed"
+
+# Performance
+benchmark: ## Run performance benchmark
+	@echo "⚡ Running performance benchmark..."
+	python scripts/benchmark.py
+	@echo "✅ Benchmark completed"
+
+load-test: ## Run load test
+	@echo "🏋️ Running load test..."
+	locust -f scripts/load_test.py --host=http://localhost
+	@echo "✅ Load test completed"
+
+# Monitoring
+monitor: ## Start monitoring dashboard
+	@echo "📊 Starting monitoring..."
+	@make deploy-prod
+	@echo "🌐 Grafana available at: http://localhost:3000"
+	@echo "📈 Prometheus available at: http://localhost:9090"
+
+# SSL setup
+setup-ssl: ## Setup SSL certificates
+	@echo "🔒 Setting up SSL certificates..."
+	./scripts/setup_ssl.sh
+	@echo "✅ SSL certificates configured"
+
+# Production utilities
+production-check: ## Pre-production checklist
+	@echo "✅ Pre-production Checklist:"
+	@echo "📋 Checking environment variables..."
+	@python scripts/check_env.py
+	@echo "📋 Checking database connection..."
+	@make verify-db
+	@echo "📋 Checking Redis connection..."
+	@docker-compose -f docker-compose.prod.yml exec redis redis-cli ping
+	@echo "📋 Checking API health..."
+	@make health-check
+	@echo "✅ All checks passed - ready for production!"
+
+# Quick commands
+quick-deploy: build deploy-services health-check ## Quick deployment without data migration
+	@echo "⚡ Quick deployment completed"
+
+full-deploy: build deploy-services init-db health-check ## Full deployment with data migration
+	@echo "🎉 Full deployment completed"
+
+# Environment variables
+.env:
+	@echo "📝 Creating .env file from template..."
+	@cp .env.example .env
+	@echo "⚠️  Please edit .env file with your configuration"
+
+# Help for common workflows
+workflow-dev: ## Show development workflow
+	@echo "🔧 Development Workflow:"
+	@echo "1. make dev-install"
+	@echo "2. make .env (edit configuration)"
+	@echo "3. make dev"
+
+workflow-prod: ## Show production workflow
+	@echo "🚀 Production Workflow:"
+	@echo "1. make install"
+	@echo "2. make .env (edit configuration)"
+	@echo "3. make production-check"
+	@echo "4. make full-deploy"
+	@echo "5. make monitor"

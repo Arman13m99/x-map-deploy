@@ -1,0 +1,88 @@
+# production_requirements.txt - Production Python Dependencies
+
+# Core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+gunicorn==21.2.0
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9
+geoalchemy2==0.14.2
+alembic==1.12.1
+
+# Caching and background jobs
+redis==5.0.1
+aioredis==2.0.1
+celery==5.3.4
+kombu==5.3.4
+
+# Data processing
+pandas==2.1.3
+numpy==1.25.2
+scipy==1.11.4
+geopandas==0.14.1
+shapely==2.0.2
+
+# HTTP and async
+httpx==0.25.2
+aiohttp==3.9.1
+asyncio-throttle==1.0.2
+
+# Geospatial
+fiona==1.9.5
+pyproj==3.6.1
+rtree==1.1.0
+
+# Performance and compression
+ujson==5.8.0
+orjson==3.9.10
+python-multipart==0.0.6
+zlib-ng==0.3.0
+
+# Monitoring and logging
+prometheus-client==0.19.0
+structlog==23.2.0
+python-json-logger==2.0.7
+sentry-sdk[fastapi]==1.38.0
+
+# Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.6
+
+# Configuration
+python-dotenv==1.0.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Development and testing (optional for production)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-cov==4.1.0
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+
+# Additional utilities
+click==8.1.7
+python-dateutil==2.8.2
+pytz==2023.3
+python-slugify==8.0.1
+
+# WSGI/ASGI servers
+waitress==2.1.2  # Alternative for Windows
+
+# Backup and data export
+openpyxl==3.1.2
+xlsxwriter==3.1.9
+
+# Health monitoring
+psutil==5.9.6
+
+# Memory optimization
+pympler==0.9
+
+# Production utilities
+supervisor==4.2.5  # Process management
+croniter==2.0.1     # Cron schedule parsing

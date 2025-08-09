@@ -1,0 +1,61 @@
+# docker/Dockerfile.worker - Celery Worker Container
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    C_FORCE_ROOT=1
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    curl \
+    git \
+    build-essential \
+    gdal-bin \
+    libgdal-dev \
+    libspatialindex-dev \
+    libgeos-dev \
+    libproj-dev \
+    netcat-traditional \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create application user
+RUN groupadd -r worker && useradd -r -g worker worker
+
+# Set work directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt production_requirements.txt ./
+RUN pip install --no-cache-dir -r production_requirements.txt
+
+# Copy application code
+COPY backend/ ./backend/
+COPY data/ ./data/
+COPY scripts/ ./scripts/
+
+# Create necessary directories and set permissions
+RUN mkdir -p /app/logs /app/celerybeat && \
+    chown -R worker:worker /app
+
+# Copy worker entrypoint
+COPY docker/worker-entrypoint.sh /worker-entrypoint.sh
+RUN chmod +x /worker-entrypoint.sh && chown worker:worker /worker-entrypoint.sh
+
+# Switch to non-root user
+USER worker
+
+# Set PYTHONPATH
+ENV PYTHONPATH=/app/backend
+
+# Health check for worker
+HEALTHCHECK --interval=60s --timeout=30s --start-period=10s --retries=3 \
+    CMD celery -A tasks inspect ping || exit 1
+
+# Run worker
+ENTRYPOINT ["/worker-entrypoint.sh"]
+CMD ["worker"]

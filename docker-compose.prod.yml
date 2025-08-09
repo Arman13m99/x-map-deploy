@@ -1,0 +1,270 @@
+# docker-compose.prod.yml - Production Multi-Service Setup
+version: '3.8'
+
+services:
+  # PostgreSQL Database with PostGIS
+  postgres:
+    image: postgis/postgis:15-3.3
+    container_name: tapsifood_postgres
+    environment:
+      POSTGRES_DB: ${DB_NAME:-tapsifood_dashboard}
+      POSTGRES_USER: ${DB_USER:-dashboard_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./scripts/create_indexes.sql:/docker-entrypoint-initdb.d/02-indexes.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-dashboard_user} -d ${DB_NAME:-tapsifood_dashboard}"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: tapsifood_redis
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/etc/redis/redis.conf
+    ports:
+      - "6379:6379"
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # FastAPI Application (Multiple instances for load balancing)
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: tapsifood-dashboard:production
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-dashboard_user}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-tapsifood_dashboard}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+      - SECRET_KEY=${SECRET_KEY}
+      - METABASE_URL=${METABASE_URL}
+      - METABASE_USERNAME=${METABASE_USERNAME}
+      - METABASE_PASSWORD=${METABASE_PASSWORD}
+    volumes:
+      - ./frontend:/app/frontend:ro
+      - ./data:/app/data:ro
+      - app_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 3
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+
+  # Celery Worker (Background tasks)
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    image: tapsifood-worker:production
+    command: celery -A tasks worker --loglevel=info --concurrency=4 --max-tasks-per-child=1000
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-dashboard_user}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-tapsifood_dashboard}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+      - METABASE_URL=${METABASE_URL}
+      - METABASE_USERNAME=${METABASE_USERNAME}
+      - METABASE_PASSWORD=${METABASE_PASSWORD}
+    volumes:
+      - ./data:/app/data:ro
+      - worker_logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "celery", "-A", "tasks", "inspect", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  # Celery Beat (Task scheduler)
+  scheduler:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    image: tapsifood-worker:production
+    command: celery -A tasks beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://${DB_USER:-dashboard_user}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-tapsifood_dashboard}
+      - REDIS_URL=redis://redis:6379
+      - ENVIRONMENT=production
+      - METABASE_URL=${METABASE_URL}
+      - METABASE_USERNAME=${METABASE_USERNAME}
+      - METABASE_PASSWORD=${METABASE_PASSWORD}
+    volumes:
+      - ./data:/app/data:ro
+      - scheduler_logs:/app/logs
+      - celery_beat:/app/celerybeat
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # Nginx Load Balancer
+  nginx:
+    image: nginx:alpine
+    container_name: tapsifood_nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - web
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/api/v2/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  # Monitoring with Prometheus (Optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: tapsifood_prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+  # Grafana Dashboard (Optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: tapsifood_grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    ports:
+      - "3000:3000"
+    networks:
+      - tapsifood_network
+    restart: unless-stopped
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_logs:
+    driver: local
+  worker_logs:
+    driver: local
+  scheduler_logs:
+    driver: local
+  nginx_logs:
+    driver: local
+  celery_beat:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  tapsifood_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
